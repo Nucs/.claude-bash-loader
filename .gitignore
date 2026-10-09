@@ -1,0 +1,2 @@
+# Types the engine writes into a plugin folder it loads (claude --plugin-dir, CLAUDE_CODE_PLUGIN_DIRS).
+.claude-plugin/types/

@@ -1,0 +1,4 @@
+# LF everywhere, also in Windows checkouts (core.autocrlf=true): bash reads a CR at the end of
+# every line of a CRLF script as part of the command, and Claude Code's marketplace clone of this
+# repository is such a checkout.
+* text=auto eol=lf

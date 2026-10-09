@@ -1,0 +1,18 @@
+{
+  "name": "bash-loader",
+  "version": "0.1.0",
+  "description": "Loads your bash extensions (~/.claude/bash-ext/*.sh, and a project's .claude/bash-ext/*.sh when you allow it) into every Bash call Claude Code makes, through BASH_ENV and a daily cache; plus a skill for writing such scripts.",
+  "author": { "name": "Eli Belash" },
+  "homepage": "https://github.com/Nucs/.claude-bash-loader",
+  "repository": "https://github.com/Nucs/.claude-bash-loader",
+  "license": "MIT",
+  "keywords": ["bash", "BASH_ENV", "shell", "extensions", "git-bash", "wsl"],
+  "userConfig": {
+    "projects": {
+      "type": "string",
+      "title": "Projects allowed to load their own .claude/bash-ext",
+      "description": "Project folders whose .claude/bash-ext/*.sh scripts load into every Bash call of a session started there, separated by ';'. An absolute path or a glob: * within one folder name, ** across folders (K:/source/*). * alone allows every project. Empty: only ~/.claude extensions load, so a cloned repository cannot put code into your shells.",
+      "default": ""
+    }
+  }
+}

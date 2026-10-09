@@ -1,0 +1,12 @@
+{
+  "name": "bash-loader",
+  "description": "bash-loader: your bash extensions in every Bash call Claude Code makes.",
+  "owner": { "name": "Eli Belash" },
+  "plugins": [
+    {
+      "name": "bash-loader",
+      "source": "./",
+      "description": "Your bash extensions in every Bash call Claude Code makes, through BASH_ENV and a daily cache."
+    }
+  ]
+}
