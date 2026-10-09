@@ -30,7 +30,7 @@ check() {
 in_shell() {
   local root="$1" code="$2"
   shift 2
-  env -u BASH_ENV -u CLAUDE_BASH_LOADER_PROJECT CLAUDE_BASH_LOADER_ROOT="$root" "$@" \
+  env -u BASH_ENV -u CLAUDE_BASH_LOADER_PROJECT -u CLAUDE_BASH_LOADER_PARENT CLAUDE_BASH_LOADER_ROOT="$root" "$@" \
     bash --noprofile --norc -c 'source "$1"; eval "$2"' _ "$LOADER" "$code" 2>&1
 }
 
@@ -119,6 +119,23 @@ fi
 mkdir -p "$R1/somewhere"; cp "$LOADER" "$R1/somewhere/claude-bash-loader.sh"
 in_shell "$R1" ':' ENV_SETUP_REBUILD=1 >/dev/null
 check "a copy of the loader under the root is not loaded" "0" "$(grep -c 'claude-bash-loader.sh - the BASH_ENV loader' "$R1/.env-cached-$TAG-$DAY")"
+
+# 9. The machine's own BASH_ENV (CLAUDE_BASH_LOADER_PARENT) runs first, then the extensions.
+R9="$TMP/r9"; make_root "$R9"
+printf 'ORDER="${ORDER:-}ext"\nLOADS=$(( ${LOADS:-0} + 1 ))\n' > "$R9/bash-ext/zz-order.sh"
+PD="$TMP/parent"; mkdir -p "$PD"
+printf 'parent_fn() { echo parent; }\nORDER="parent,"\n' > "$PD/parent.sh"
+check "parent runs first, extensions after" $'parent\nparent,ext' "$(in_shell "$R9" 'parent_fn; echo "$ORDER"' CLAUDE_BASH_LOADER_PARENT="$PD/parent.sh")"
+check "a \$VAR in the parent value is expanded, as bash expands BASH_ENV" "parent" "$(in_shell "$R9" 'parent_fn' PDIR="$PD" CLAUDE_BASH_LOADER_PARENT='$PDIR/parent.sh')"
+check "a missing parent file is skipped silently" "global" "$(in_shell "$R9" 'g_fn' CLAUDE_BASH_LOADER_PARENT="$TMP/none/missing.sh")"
+# A parent that leads back to the loader (a shim, as ~/.claude/bash-env.sh is on the author's
+# machine): the nested call returns at once, the extensions load once, nothing recurses.
+printf 'SHIM=1\nCLAUDE_BASH_LOADER_ROOT=%q source %q\n' "$TMP/elsewhere" "$LOADER" > "$PD/shim.sh"
+check "a parent that sources the loader again loads the extensions once" "1 1 global" "$(in_shell "$R9" 'echo "$SHIM $LOADS $(g_fn)"' CLAUDE_BASH_LOADER_PARENT="$PD/shim.sh")"
+check "the nested call did not build the other root" "no" "$([[ -e $TMP/elsewhere ]] && echo yes || echo no)"
+check "claude_bash_reload with such a parent loads once more, no loop" "2" "$(in_shell "$R9" 'claude_bash_reload 2>/dev/null; echo "$LOADS"' CLAUDE_BASH_LOADER_PARENT="$PD/shim.sh")"
+check "the timing line reports the parent" "yes" "$(in_shell "$R9" ':' ENV_SETUP_PERF=1 CLAUDE_BASH_LOADER_PARENT="$PD/parent.sh" | grep -q 'parent:[0-9]*ms' && echo yes)"
+check "no _cbl_ names left after a parent ran" "" "$(in_shell "$R9" 'compgen -v _cbl_' CLAUDE_BASH_LOADER_PARENT="$PD/shim.sh")"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

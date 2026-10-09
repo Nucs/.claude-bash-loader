@@ -24,8 +24,11 @@ Skipped folders (never scanned): `projects`, `plugins`, `plugin-data`, `file-his
 `todos`. A file in `~/.claude` that matches an extension name but must not load belongs in one of
 them, or needs another name: a stray `env.sh` four levels down loads into every shell.
 
-Order: `.env`, then global extensions (folders in name order, files sorted within a folder), then
-the project's. A later definition wins, so a project can override a global function.
+Order: the machine's own `BASH_ENV` (the one the plugin replaced: an OS variable or a profile's
+export; plugin option `parentBashEnv`, on by default), then `.env`, then global extensions
+(folders in name order, files sorted within a folder), then the project's. A later definition
+wins, so an extension can override the machine's setup and a project can override a global
+function. A parent file that sources the loader again (a shim) is safe: the nested call returns.
 
 ## The load-time rules
 

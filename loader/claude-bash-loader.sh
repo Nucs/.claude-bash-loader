@@ -11,6 +11,9 @@
 # Outside Claude Code a shell or OS variable can point BASH_ENV at the same copy (see README).
 #
 # What it loads, in this order:
+#   0. The machine's own BASH_ENV, the value the plugin replaced (an OS variable, a shell
+#      profile's export, settings.json env), passed in CLAUDE_BASH_LOADER_PARENT. Installing the
+#      plugin keeps that setup; its parentBashEnv option turns this off.
 #   1. <root>/.env: every NAME=value and export NAME=value line, exported.
 #   2. Global extensions, <root> being $CLAUDE_BASH_LOADER_ROOT, else $CLAUDE_CONFIG_DIR, else
 #      ~/.claude: every *.sh up to 4 levels deep in <root>/bash-ext; in the other folders of
@@ -27,18 +30,42 @@
 # cache lives one UTC day, per platform (win, wsl, linux, darwin) and per project; an edit shows
 # up the next day, or at once after claude_bash_reload (or ENV_SETUP_REBUILD=1).
 #
-# Reads: CLAUDE_BASH_LOADER_ROOT, CLAUDE_CONFIG_DIR, HOME, CLAUDE_BASH_LOADER_PROJECT,
-#   ENV_SETUP_REBUILD=1 (rebuild now), ENV_SETUP_PERF=1 (print timing) or 2 (print only above
-#   ENV_SETUP_WARN_MS, default 10).
+# Reads: CLAUDE_BASH_LOADER_PARENT, CLAUDE_BASH_LOADER_ROOT, CLAUDE_CONFIG_DIR, HOME,
+#   CLAUDE_BASH_LOADER_PROJECT, ENV_SETUP_REBUILD=1 (rebuild now), ENV_SETUP_PERF=1 (print
+#   timing) or 2 (print only above ENV_SETUP_WARN_MS, default 10).
 # Leaves behind: the extensions' own definitions, CLAUDE_BASH_ENV_LOADED=1 (exported) and the
 #   function claude_bash_reload. Every other name it uses starts with _cbl_ and is removed
 #   before it returns, so nothing of the loader itself leaks into the shell.
 
-# Needs bash 5 (EPOCHSECONDS, mapfile, declare -A, ${x,,}). An older bash (macOS /bin/bash 3.2)
-# skips the loader instead of printing errors in every shell; sourced, `return` ends this file.
-if (( ${BASH_VERSINFO[0]:-0} < 5 )); then return 0 2>/dev/null || exit 0; fi
+# Re-entry guard. A chain that leads back here must neither recurse nor load twice: on a
+# machine whose own BASH_ENV is a shim that sources this loader (the parent, below), the nested
+# call returns at once and this outer call does the loading, with its own root. _cbl_active is
+# set from here to the end of the file; not exported, so a child bash loads again.
+if [[ -n ${_cbl_active:-} ]]; then return 0 2>/dev/null || exit 0; fi
+_cbl_active=1
 
-# Timing, zero-cost when disabled (ENV_SETUP_PERF=1 shows it, =2 warns above a threshold).
+# The machine's own BASH_ENV first: the plugin saved the value it replaced in
+# CLAUDE_BASH_LOADER_PARENT (unset when the plugin's parentBashEnv option is off). bash expands
+# a BASH_ENV value (parameters, command substitution, arithmetic) before using it as a file
+# name, so the same happens here when the value holds a `$`; a file that is not there is
+# skipped silently, as bash itself does. It runs before everything else, so the extensions can
+# override what it defines. This part stays bash 3.2-compatible: the parent still runs where
+# the rest of the loader cannot (EPOCHREALTIME is empty there, so no timing).
+if [[ -n ${CLAUDE_BASH_LOADER_PARENT:-} ]]; then
+  _cbl_parent="$CLAUDE_BASH_LOADER_PARENT"
+  case "$_cbl_parent" in *'$'*) eval "_cbl_parent=\"$_cbl_parent\"" ;; esac
+  _cbl_parent_t0="${EPOCHREALTIME:-}"
+  [[ -f "$_cbl_parent" ]] && source "$_cbl_parent"
+  [[ -n "$_cbl_parent_t0" ]] && _cbl_parent_ms=$(( (${EPOCHREALTIME/.} - ${_cbl_parent_t0/.}) / 1000 ))
+  unset _cbl_parent _cbl_parent_t0
+fi
+
+# Needs bash 5 (EPOCHSECONDS, mapfile, declare -A, ${x,,}). An older bash (macOS /bin/bash 3.2)
+# skips the rest instead of printing errors in every shell; sourced, `return` ends this file.
+if (( ${BASH_VERSINFO[0]:-0} < 5 )); then unset _cbl_active _cbl_parent_ms; return 0 2>/dev/null || exit 0; fi
+
+# Timing, zero-cost when disabled (ENV_SETUP_PERF=1 shows it, =2 warns above a threshold). It
+# starts after the parent, whose own time is reported apart ("parent:").
 [[ "${ENV_SETUP_PERF:-0}" != "0" ]] && _cbl_perf_start=${EPOCHREALTIME/.}
 
 # _cbl_norm <var> <path>: store <path> in the variable <var> with / separators and no trailing
@@ -232,7 +259,8 @@ eval "claude_bash_reload() { CLAUDE_BASH_LOADER_ROOT=$_cbl_q_root ENV_SETUP_REBU
 if [[ -n "${_cbl_perf_start:-}" ]]; then
   _cbl_perf_ms=$(( (${EPOCHREALTIME/.} - _cbl_perf_start) / 1000 ))
   _cbl_perf_detail=""
-  (( _cbl_rebuild_ms > 0 )) && _cbl_perf_detail="cache:${_cbl_rebuild_ms}ms "
+  [[ -n "${_cbl_parent_ms:-}" ]] && _cbl_perf_detail="parent:${_cbl_parent_ms}ms "
+  (( _cbl_rebuild_ms > 0 )) && _cbl_perf_detail="${_cbl_perf_detail}cache:${_cbl_rebuild_ms}ms "
   [[ -n "${_cbl_perf_load_ms:-}" ]] && _cbl_perf_detail="${_cbl_perf_detail}eval:${_cbl_perf_load_ms}ms"
   [[ -n "$_cbl_perf_detail" ]] && _cbl_perf_detail=" (${_cbl_perf_detail% })"
   if [[ "${ENV_SETUP_PERF}" == "2" ]] && (( _cbl_perf_ms > ${ENV_SETUP_WARN_MS:-10} )); then
@@ -249,4 +277,4 @@ unset -f _cbl_norm _cbl_acquire_lock _cbl_release_lock _cbl_concat _cbl_build_gl
   _cbl_build_project _cbl_clean_global _cbl_clean_project _cbl_ensure
 unset _cbl_perf_start _cbl_perf_load_start _cbl_perf_load_ms _cbl_perf_ms _cbl_perf_detail \
   _cbl_platform _cbl_root _cbl_day _cbl_lock _cbl_rebuild_ms _cbl_cache _cbl_pcache \
-  _cbl_project _cbl_pkey _cbl_q_self _cbl_q_root
+  _cbl_project _cbl_pkey _cbl_q_self _cbl_q_root _cbl_parent_ms _cbl_active

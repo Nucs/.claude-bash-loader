@@ -62,6 +62,18 @@ their own .claude/bash-ext*: paths or globs separated by `;` (`K:/source/*`, `~`
 paths, `**` across folders, `*` alone for every project). A project's definitions load after the
 global ones and win over them.
 
+### Your machine's own BASH_ENV
+
+bash-loader replaces `BASH_ENV` in Claude Code sessions, but keeps what it replaced. A `BASH_ENV`
+that Claude Code inherited (an OS variable, a shell profile's export, `settings.json` env) goes
+to the loader as `CLAUDE_BASH_LOADER_PARENT`, and the loader sources that file **first**, then
+your extensions, which can override what it defines. Like bash, it expands `$VAR` in the value;
+a file that is not there is skipped. The time it takes shows as `parent:` in the timing line.
+
+If that file leads back to bash-loader (a shim that sources the loader), the nested call returns
+at once: nothing loads twice and nothing loops. To run only bash-loader's loader, turn off
+`/config` → *Run the machine's own BASH_ENV first* (`parentBashEnv`).
+
 ### Shells outside Claude Code
 
 The plugin keeps the loader at `~/.claude/plugin-data/bash-loader/claude-bash-loader.sh`. Point
@@ -82,10 +94,11 @@ The copy appears at the first Claude Code session after installing.
 ## How it works
 
 1. At session start the plugin's hooks module copies `loader/claude-bash-loader.sh` to the path
-   above (only when it changed), sets `BASH_ENV` to it, and sets `CLAUDE_BASH_LOADER_PROJECT` to the
-   session's project when the `projects` option allows it. Every process the session starts
-   afterwards inherits both.
-2. Each bash sources the loader. It looks for today's cache,
+   above (only when it changed), keeps the inherited `BASH_ENV` in `CLAUDE_BASH_LOADER_PARENT`,
+   sets `BASH_ENV` to the copy, and sets `CLAUDE_BASH_LOADER_PROJECT` to the session's project when
+   the `projects` option allows it. Every process the session starts afterwards inherits them.
+2. Each bash sources the loader. It sources the parent `BASH_ENV` first (if any), then looks for
+   today's cache,
    `~/.claude/.env-cached-<platform>-<UTC day>` (and the project's
    `.env-cached-project-<platform>-<day>-<project>`), and builds it when missing: `.env` exports,
    then each extension behind a `_SOURCE_DIR="<its folder>"` line, CR removed. Two `find` calls,

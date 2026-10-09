@@ -1,6 +1,6 @@
 {
   "name": "bash-loader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Loads your bash extensions (~/.claude/bash-ext/*.sh, and a project's .claude/bash-ext/*.sh when you allow it) into every Bash call Claude Code makes, through BASH_ENV and a daily cache; plus a skill for writing such scripts.",
   "author": { "name": "Eli Belash" },
   "homepage": "https://github.com/Nucs/.claude-bash-loader",
@@ -8,6 +8,12 @@
   "license": "MIT",
   "keywords": ["bash", "BASH_ENV", "shell", "extensions", "git-bash", "wsl"],
   "userConfig": {
+    "parentBashEnv": {
+      "type": "boolean",
+      "title": "Run the machine's own BASH_ENV first",
+      "description": "bash-loader replaces BASH_ENV in Claude Code sessions. On: the BASH_ENV Claude Code inherited (an OS variable, a shell profile's export, settings.json env) runs first in every Bash call, then bash-loader's extensions, which can override it. Off: only bash-loader's loader runs.",
+      "default": true
+    },
     "projects": {
       "type": "string",
       "title": "Projects allowed to load their own .claude/bash-ext",

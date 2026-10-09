@@ -68,6 +68,20 @@ export function comparable(path: string): string {
 }
 
 /**
+ * Reports whether two spellings name the same path: {@link comparable} spellings compared
+ * whole, ignoring case when they are Windows paths (a drive letter), whose case does not matter.
+ *
+ * @param a one path, in any spelling
+ * @param b the other
+ * @returns true when both name the same path
+ */
+export function samePath(a: string, b: string): boolean {
+  const x = comparable(a)
+  const y = comparable(b)
+  return /^[a-z]:/.test(x) ? x.toLowerCase() === y.toLowerCase() : x === y
+}
+
+/**
  * Turns one allow-list entry into an anchored regular expression.
  *
  * `**` matches any run of characters, folders included; `*` a run within one folder name;
@@ -119,24 +133,39 @@ export function isProjectAllowed(root: string, allowed: string): boolean {
 }
 
 /**
- * Prepares one session: refreshes the loader copy, points BASH_ENV at it, and names the project
- * for the loader when the `projects` option allows it.
+ * Prepares one session: refreshes the loader copy, keeps the machine's own BASH_ENV as the
+ * loader's parent, points BASH_ENV at the copy, and names the project for the loader when the
+ * `projects` option allows it.
  *
- * Everything the session starts afterwards inherits both variables: every Bash call, every hook
- * run through a shell, every MCP server. The copy is rewritten only when its text differs, and
- * without CR: a checkout that turned the loader's LF into CRLF would otherwise hand bash a `\r`
- * at the end of every command.
+ * Everything the session starts afterwards inherits these variables: every Bash call, every
+ * hook run through a shell, every MCP server. The copy is rewritten only when its text differs,
+ * and without CR: a checkout that turned the loader's LF into CRLF would otherwise hand bash a
+ * `\r` at the end of every command.
+ *
+ * The parent: the BASH_ENV this process inherited (an OS variable, a shell profile's export,
+ * settings.json env) goes to CLAUDE_BASH_LOADER_PARENT, which the loader sources first, so
+ * taking over BASH_ENV keeps the machine's setup. When BASH_ENV already names the copy, the
+ * value is this plugin's own (a module reload in this process, or a child Claude Code process
+ * that inherited both variables): the parent recorded then stays as it is. Off
+ * (`parentBashEnv: false`), the variable is unset and only this plugin's loader runs.
  *
  * @param $ the engine interface
  * @param projects the `projects` option
+ * @param chainParent the `parentBashEnv` option: true to run the machine's BASH_ENV first
  * @throws Error when the plugin's loader cannot be read, the copy cannot be written, or the
  *   config folder cannot be resolved; the caller logs it and the session runs without the loader
  */
-export async function setUp($: EngineInterface, projects: string): Promise<void> {
+export async function setUp($: EngineInterface, projects: string, chainParent: boolean): Promise<void> {
   const copy = `${await configDir($)}/${DATA_DIR}/${LOADER}`
   const text = (await $.fs.read(`${$.plugin.root}/loader/${LOADER}`)).replace(/\r/g, '')
   const current = (await $.fs.exists(copy)) ? await $.fs.read(copy) : undefined
   if (current !== text) await $.fs.write(copy, text)
+  const inherited = await $.env.get('BASH_ENV')
+  if (!chainParent) {
+    await $.env.set('CLAUDE_BASH_LOADER_PARENT', undefined)
+  } else if (inherited !== undefined && inherited.trim() !== '' && !samePath(inherited, copy)) {
+    await $.env.set('CLAUDE_BASH_LOADER_PARENT', inherited)
+  }
   await $.env.set('BASH_ENV', copy)
   const root = await $.session.root()
   await $.env.set('CLAUDE_BASH_LOADER_PROJECT', isProjectAllowed(root, projects) ? toSlashes(root) : undefined)
@@ -152,13 +181,15 @@ export async function setUp($: EngineInterface, projects: string): Promise<void>
  * `session.start` again with the new value.
  *
  * @param on the engine's registrar
- * @param options the plugin's settings; `projects` is the project allow-list
+ * @param options the plugin's settings; `projects` is the project allow-list, `parentBashEnv`
+ *   (default true) runs the machine's own BASH_ENV first
  */
 export const register: Register = (on, options) => {
   const projects = typeof options.projects === 'string' ? options.projects : ''
+  const chainParent = options.parentBashEnv !== false
   on('session.start', async ($, e, next) => {
     try {
-      await setUp($, projects)
+      await setUp($, projects, chainParent)
     } catch (error) {
       $.ui.log(`bash-loader: this session runs without the loader: ${String(error)}`, { to: 'debug' })
     }

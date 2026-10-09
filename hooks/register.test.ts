@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { describe, expect, test, type Engine } from 'claude-code/testing'
-import { comparable, globRegExp, isProjectAllowed } from './register.ts'
+import { comparable, globRegExp, isProjectAllowed, samePath } from './register.ts'
 
 /** What the in-memory world beneath the plugin holds and records. */
 type World = {
@@ -115,6 +115,47 @@ describe('BASH_ENV', () => {
     const w = world(on, { loaderMissing: true })
     await start($)
     expect(w.env.has('BASH_ENV')).toBe(false)
+  })
+})
+
+describe('parent BASH_ENV', () => {
+  test('the inherited BASH_ENV becomes the parent, verbatim, and BASH_ENV the copy', async ($, on) => {
+    const w = world(on, { env: { USERPROFILE: 'C:\\Users\\me', BASH_ENV: '$HOME/.bashenv.sh' } })
+    await start($)
+    expect(w.env.get('CLAUDE_BASH_LOADER_PARENT')).toBe('$HOME/.bashenv.sh')
+    expect(w.env.get('BASH_ENV')).toBe(COPY)
+  })
+
+  test('a BASH_ENV that already names the copy keeps the parent recorded before', async ($, on) => {
+    const w = world(on, {
+      env: {
+        USERPROFILE: 'C:\\Users\\me',
+        BASH_ENV: 'c:\\users\\ME\\.claude\\plugin-data\\bash-loader\\claude-bash-loader.sh',
+        CLAUDE_BASH_LOADER_PARENT: 'C:\\Users\\me\\.claude\\bash-env.sh',
+      },
+    })
+    await start($)
+    expect(w.env.get('CLAUDE_BASH_LOADER_PARENT')).toBe('C:\\Users\\me\\.claude\\bash-env.sh')
+    expect(w.env.get('BASH_ENV')).toBe(COPY)
+  })
+
+  test('no inherited BASH_ENV: no parent', async ($, on) => {
+    const w = world(on)
+    await start($)
+    expect(w.env.has('CLAUDE_BASH_LOADER_PARENT')).toBe(false)
+  })
+
+  test('parentBashEnv off clears the parent', { options: { parentBashEnv: false } }, async ($, on) => {
+    const w = world(on, { env: { USERPROFILE: 'C:\\Users\\me', BASH_ENV: '/etc/bashenv', CLAUDE_BASH_LOADER_PARENT: '/etc/bashenv' } })
+    await start($)
+    expect(w.env.get('CLAUDE_BASH_LOADER_PARENT')).toBeUndefined()
+    expect(w.env.get('BASH_ENV')).toBe(COPY)
+  })
+
+  test('samePath: Windows spellings and case match, other paths keep case', () => {
+    expect(samePath('C:\\Users\\Me\\x.sh', '/c/users/me/x.sh')).toBe(true)
+    expect(samePath('/home/me/x.sh', '/home/Me/x.sh')).toBe(false)
+    expect(samePath('/home/me/x.sh', '/home/me/x.sh/')).toBe(true)
   })
 })
 
